@@ -4,6 +4,35 @@ const BLOCK = 20; // pixels
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let bgmInterval = null;
+
+function playTone(freq, duration){
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.stop(audioCtx.currentTime + duration);
+}
+
+function startBGM(){
+    if(bgmInterval) return;
+    const notes = [440,392,330,392,440,440,440,392,392,392,440,330,330,330];
+    let i = 0;
+    bgmInterval = setInterval(()=>{
+        playTone(notes[i%notes.length],0.25);
+        i++;
+    },300);
+}
+
+function lineClearSound(){ playTone(880,0.2); }
+function lockSound(){ playTone(660,0.1); }
+
 const SHAPES = {
     'I': [
         [[0,1],[1,1],[2,1],[3,1]],
@@ -59,6 +88,8 @@ class Tetris {
     constructor(){
         this.board = Array.from({length: BOARD_HEIGHT}, () => Array(BOARD_WIDTH).fill(0));
         this.score = 0;
+        this.level = 1;
+        this.speed = 500;
         this.current = this.newPiece();
         this.next = this.newPiece();
         this.interval = null;
@@ -86,6 +117,7 @@ class Tetris {
         this.current = this.next;
         this.next = this.newPiece();
         if(this.collides(this.current)) this.gameOver();
+        lockSound();
     }
     removeLines(){
         let newBoard = this.board.filter(row => row.some(cell => !cell));
@@ -96,6 +128,26 @@ class Tetris {
         this.board = newBoard;
         this.score += removed;
         document.getElementById('score').textContent = `Score: ${this.score}`;
+        if(removed > 0) lineClearSound();
+        this.updateLevel();
+    }
+    updateLevel(){
+        const newLevel = Math.floor(this.score / 10) + 1;
+        if(newLevel !== this.level){
+            this.level = newLevel;
+            document.getElementById('level').textContent = `Level: ${this.level}`;
+            this.updateSpeed();
+        }
+    }
+    updateSpeed(){
+        this.speed = Math.max(100, 500 - (this.level - 1) * 50);
+        if(this.interval){
+            clearInterval(this.interval);
+            this.interval = setInterval(()=>{
+                if(!this.move(0,1)) this.lock(this.current);
+                this.draw();
+            }, this.speed);
+        }
     }
     move(dx, dy, drot=false){
         if(!this.collides(this.current, dx, dy, drot)){
@@ -105,6 +157,11 @@ class Tetris {
             return true;
         }
         return false;
+    }
+    hardDrop(){
+        while(this.move(0,1));
+        this.lock(this.current);
+        this.draw();
     }
     draw(){
         ctx.clearRect(0,0,canvas.width, canvas.height);
@@ -128,7 +185,7 @@ class Tetris {
         this.interval = setInterval(()=>{
             if(!this.move(0,1)) this.lock(this.current);
             this.draw();
-        },500);
+        }, this.speed);
     }
     gameOver(){
         clearInterval(this.interval);
@@ -137,11 +194,18 @@ class Tetris {
 }
 
 const game = new Tetris();
+let started = false;
 window.addEventListener('keydown', e=>{
+    if(!started){
+        audioCtx.resume();
+        startBGM();
+        started = true;
+    }
     if(e.key === 'ArrowLeft') game.move(-1,0);
     else if(e.key === 'ArrowRight') game.move(1,0);
     else if(e.key === 'ArrowUp') game.move(0,0,true);
     else if(e.key === 'ArrowDown') game.move(0,1);
+    else if(e.code === 'Space') game.hardDrop();
     else if(e.key.toLowerCase() === 'q') game.gameOver();
     game.draw();
 });
